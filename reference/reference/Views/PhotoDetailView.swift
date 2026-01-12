@@ -10,16 +10,18 @@ struct PhotoDetailView: View {
 
     @State private var showingDeleteConfirmation = false
     @State private var showingTagEditor = false
+    @State private var showingCropEditor = false
     @State private var newTagName = ""
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: 16) {
-                    // Full-size image
-                    if let data = PhotoStorageService.loadImageData(filename: photo.filename) {
+                    // Full-size cropped image
+                    if let data = PhotoStorageService.loadImageData(filename: photo.filename),
+                       let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect) {
                         #if os(macOS)
-                        if let nsImage = NSImage(data: data) {
+                        if let nsImage = NSImage(data: croppedData) {
                             Image(nsImage: nsImage)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -28,7 +30,7 @@ struct PhotoDetailView: View {
                             photoPlaceholder
                         }
                         #else
-                        if let uiImage = UIImage(data: data) {
+                        if let uiImage = UIImage(data: croppedData) {
                             Image(uiImage: uiImage)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -40,6 +42,22 @@ struct PhotoDetailView: View {
                     } else {
                         photoPlaceholder
                     }
+
+                    // Crop section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Crop")
+                                .font(.headline)
+                            Spacer()
+                            Button {
+                                showingCropEditor = true
+                            } label: {
+                                Label("Edit Crop", systemImage: "crop")
+                                    .font(.subheadline)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
 
                     // Tags section
                     VStack(alignment: .leading, spacing: 12) {
@@ -106,6 +124,23 @@ struct PhotoDetailView: View {
         .sheet(isPresented: $showingTagEditor) {
             TagEditorSheet(photo: photo, availableTags: allTags)
         }
+        .sheet(isPresented: $showingCropEditor) {
+            if let data = PhotoStorageService.loadImageData(filename: photo.filename) {
+                CropView(
+                    imageData: data,
+                    initialCropRect: photo.cropRect,
+                    onConfirm: { newCropRect in
+                        photo.cropX = newCropRect.origin.x
+                        photo.cropY = newCropRect.origin.y
+                        photo.cropSize = newCropRect.width
+                        showingCropEditor = false
+                    },
+                    onCancel: {
+                        showingCropEditor = false
+                    }
+                )
+            }
+        }
     }
 
     private var photoPlaceholder: some View {
@@ -120,8 +155,19 @@ struct PhotoDetailView: View {
     }
 
     private func deletePhoto() {
+        // Get tags before deleting photo
+        let tagsToCheck = photo.tags
+
         PhotoStorageService.deleteImage(filename: photo.filename)
         modelContext.delete(photo)
+
+        // Remove any tags that now have no photos
+        for tag in tagsToCheck {
+            if tag.photos.isEmpty {
+                modelContext.delete(tag)
+            }
+        }
+
         dismiss()
     }
 }
@@ -203,6 +249,10 @@ struct TagEditorSheet: View {
     private func toggleTag(_ tag: Tag) {
         if let index = photo.tags.firstIndex(where: { $0.id == tag.id }) {
             photo.tags.remove(at: index)
+            // Remove tag if it now has no photos
+            if tag.photos.isEmpty {
+                modelContext.delete(tag)
+            }
         } else {
             photo.tags.append(tag)
         }

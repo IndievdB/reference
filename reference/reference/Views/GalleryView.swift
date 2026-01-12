@@ -11,8 +11,10 @@ struct GalleryView: View {
     @State private var selectedTag: Tag?
     @State private var showingPhotoPicker = false
     @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var showingCropView = false
     @State private var showingTagSheet = false
     @State private var pendingImageData: Data?
+    @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var showingFileImporter = false
     @State private var isDropTargeted = false
 
@@ -27,9 +29,15 @@ struct GalleryView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TagFilterView(tags: allTags, selectedTag: $selectedTag)
-                .padding(.horizontal)
-                .padding(.vertical, 8)
+            TagFilterView(tags: allTags, selectedTag: $selectedTag) { tag in
+                // Clear selection if deleting the selected tag
+                if selectedTag?.id == tag.id {
+                    selectedTag = nil
+                }
+                modelContext.delete(tag)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
 
             if filteredPhotos.isEmpty {
                 ContentUnavailableView(
@@ -37,6 +45,8 @@ struct GalleryView: View {
                     systemImage: "photo.on.rectangle.angled",
                     description: Text(selectedTag == nil ? "Add photos to get started" : "No photos with this tag")
                 )
+                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, 40)
             } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 8) {
@@ -95,22 +105,44 @@ struct GalleryView: View {
             Task {
                 if let data = try? await newValue?.loadTransferable(type: Data.self) {
                     pendingImageData = data
-                    showingTagSheet = true
+                    pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    showingCropView = true
                 }
                 selectedPhotoItem = nil
             }
         }
-        .sheet(isPresented: $showingTagSheet) {
+        .sheet(isPresented: $showingCropView) {
             if let imageData = pendingImageData {
-                TagSelectionSheet(
+                CropView(
                     imageData: imageData,
+                    initialCropRect: pendingCropRect,
+                    onConfirm: { cropRect in
+                        pendingCropRect = cropRect
+                        showingCropView = false
+                        showingTagSheet = true
+                    },
+                    onCancel: {
+                        pendingImageData = nil
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        showingCropView = false
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingTagSheet) {
+            if let imageData = pendingImageData,
+               let croppedData = ImageCropService.applyCrop(to: imageData, cropRect: pendingCropRect) {
+                TagSelectionSheet(
+                    imageData: croppedData,
                     availableTags: allTags,
                     onSave: { selectedTags in
                         savePhoto(data: imageData, tags: selectedTags)
                         pendingImageData = nil
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                     },
                     onCancel: {
                         pendingImageData = nil
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                     }
                 )
             }
@@ -120,7 +152,12 @@ struct GalleryView: View {
     private func savePhoto(data: Data, tags: [Tag]) {
         guard let filename = PhotoStorageService.saveImage(data) else { return }
 
-        let photo = Photo(filename: filename)
+        let photo = Photo(
+            filename: filename,
+            cropX: pendingCropRect.origin.x,
+            cropY: pendingCropRect.origin.y,
+            cropSize: pendingCropRect.width
+        )
         photo.tags = tags
         modelContext.insert(photo)
     }
@@ -135,7 +172,8 @@ struct GalleryView: View {
 
             if let data = try? Data(contentsOf: url) {
                 pendingImageData = data
-                showingTagSheet = true
+                pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                showingCropView = true
             }
         case .failure:
             break
@@ -156,7 +194,8 @@ struct GalleryView: View {
 
                 DispatchQueue.main.async {
                     self.pendingImageData = imageData
-                    self.showingTagSheet = true
+                    self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    self.showingCropView = true
                 }
             }
             return
@@ -171,7 +210,8 @@ struct GalleryView: View {
                 if let imageData = try? Data(contentsOf: url) {
                     DispatchQueue.main.async {
                         self.pendingImageData = imageData
-                        self.showingTagSheet = true
+                        self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        self.showingCropView = true
                     }
                 }
             }
@@ -184,7 +224,8 @@ struct GalleryView: View {
                 guard let data = data else { return }
                 DispatchQueue.main.async {
                     self.pendingImageData = data
-                    self.showingTagSheet = true
+                    self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    self.showingCropView = true
                 }
             }
         }
@@ -198,9 +239,10 @@ struct PhotoThumbnailView: View {
         Color.clear
             .aspectRatio(1, contentMode: .fit)
             .overlay {
-                if let data = PhotoStorageService.loadImageData(filename: photo.filename) {
+                if let data = PhotoStorageService.loadImageData(filename: photo.filename),
+                   let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect) {
                     #if os(macOS)
-                    if let nsImage = NSImage(data: data) {
+                    if let nsImage = NSImage(data: croppedData) {
                         Image(nsImage: nsImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
@@ -208,7 +250,7 @@ struct PhotoThumbnailView: View {
                         placeholderView
                     }
                     #else
-                    if let uiImage = UIImage(data: data) {
+                    if let uiImage = UIImage(data: croppedData) {
                         Image(uiImage: uiImage)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
