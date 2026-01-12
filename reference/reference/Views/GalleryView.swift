@@ -8,23 +8,55 @@ struct GalleryView: View {
     @Query(sort: \Tag.name) private var allTags: [Tag]
 
     @State private var selectedTag: Tag?
+    @State private var angleFilterRotation: HeadRotation?
     @State private var showingCropView = false
     @State private var showingTagSheet = false
     @State private var pendingImageData: Data?
     @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var pendingCropRotation: Double = 0.0
+    @State private var pendingHeadRotation: HeadRotation?
     @State private var pendingFilename: String?  // Reuse for multiple crops from same source
     @State private var showingFileImporter = false
     @State private var isDropTargeted = false
 
+    private let angleTolerance: Double = 20.0  // Degrees
+
     private var filteredPhotos: [Photo] {
-        guard let tag = selectedTag else { return allPhotos }
-        return allPhotos.filter { $0.tags.contains(where: { $0.id == tag.id }) }
+        var photos = allPhotos
+
+        // Filter by tag
+        if let tag = selectedTag {
+            photos = photos.filter { $0.tags.contains(where: { $0.id == tag.id }) }
+        }
+
+        // Filter by head angle
+        if let filterRotation = angleFilterRotation {
+            photos = photos.filter { photo in
+                guard let photoRotation = photo.headRotation else {
+                    return false  // Photos without angle data are excluded when filtering
+                }
+                return photoRotation.isWithinTolerance(of: filterRotation, degrees: angleTolerance)
+            }
+        }
+
+        return photos
     }
 
     private let columns = [
         GridItem(.adaptive(minimum: 150, maximum: 300), spacing: 8)
     ]
+
+    private var emptyStateMessage: String {
+        if selectedTag != nil && angleFilterRotation != nil {
+            return "No photos match both the tag and angle filters"
+        } else if selectedTag != nil {
+            return "No photos with this tag"
+        } else if angleFilterRotation != nil {
+            return "No photos match this angle"
+        } else {
+            return "Add photos to get started"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,11 +70,15 @@ struct GalleryView: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
 
+            HeadAngleFilterView(filterRotation: $angleFilterRotation, tolerance: angleTolerance)
+                .padding(.horizontal)
+                .padding(.bottom, 8)
+
             if filteredPhotos.isEmpty {
                 ContentUnavailableView(
                     "No Photos",
                     systemImage: "photo.on.rectangle.angled",
-                    description: Text(selectedTag == nil ? "Add photos to get started" : "No photos with this tag")
+                    description: Text(emptyStateMessage)
                 )
                 .frame(maxHeight: .infinity, alignment: .top)
                 .padding(.top, 40)
@@ -99,9 +135,11 @@ struct GalleryView: View {
                     imageData: imageData,
                     initialCropRect: pendingCropRect,
                     initialRotation: pendingCropRotation,
-                    onConfirm: { cropRect, rotation in
+                    initialHeadRotation: pendingHeadRotation,
+                    onConfirm: { cropRect, rotation, headRotation in
                         pendingCropRect = cropRect
                         pendingCropRotation = rotation
+                        pendingHeadRotation = headRotation
                         showingCropView = false
                         showingTagSheet = true
                     },
@@ -110,6 +148,7 @@ struct GalleryView: View {
                         pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                         showingCropView = false
                     }
                 )
@@ -128,12 +167,14 @@ struct GalleryView: View {
                         pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                     },
                     onSaveAndAddAnother: { selectedTags in
                         savePhoto(data: imageData, tags: selectedTags)
                         // Keep pendingImageData and pendingFilename for reuse
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                         showingTagSheet = false
                         // Small delay to allow sheet dismissal before showing crop view
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -145,6 +186,7 @@ struct GalleryView: View {
                         pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                     }
                 )
             }
@@ -167,7 +209,10 @@ struct GalleryView: View {
             cropX: pendingCropRect.origin.x,
             cropY: pendingCropRect.origin.y,
             cropSize: pendingCropRect.width,
-            cropRotation: pendingCropRotation
+            cropRotation: pendingCropRotation,
+            headYaw: pendingHeadRotation?.yaw,
+            headPitch: pendingHeadRotation?.pitch,
+            headRoll: pendingHeadRotation?.roll
         )
         photo.tags = tags
         modelContext.insert(photo)

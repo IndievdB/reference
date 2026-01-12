@@ -10,12 +10,17 @@ struct CropView: View {
     let imageData: Data
     let initialCropRect: CGRect
     let initialRotation: Double
-    let onConfirm: (CGRect, Double) -> Void  // Returns cropRect and rotation
+    let initialHeadRotation: HeadRotation?
+    let onConfirm: (CGRect, Double, HeadRotation?) -> Void  // Returns cropRect, rotation, and head rotation
     let onCancel: () -> Void
 
     // Crop state - stored as normalized values where cropSize is relative to shorter image dimension
     @State private var cropRect: CGRect
     @State private var rotation: Double  // Rotation in degrees
+
+    // Head rotation state
+    @State private var headRotation: HeadRotation = .zero
+    @State private var showHeadModel: Bool = true
 
     // Image metrics
     @State private var imagePixelSize: CGSize = .zero  // Actual pixel dimensions
@@ -41,63 +46,173 @@ struct CropView: View {
         imageData: Data,
         initialCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1),
         initialRotation: Double = 0.0,
-        onConfirm: @escaping (CGRect, Double) -> Void,
+        initialHeadRotation: HeadRotation? = nil,
+        onConfirm: @escaping (CGRect, Double, HeadRotation?) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.imageData = imageData
         self.initialCropRect = initialCropRect
         self.initialRotation = initialRotation
+        self.initialHeadRotation = initialHeadRotation
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         self._cropRect = State(initialValue: initialCropRect)
         self._rotation = State(initialValue: initialRotation)
+        self._headRotation = State(initialValue: initialHeadRotation ?? .zero)
     }
 
     var body: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                ZStack {
-                    Color.black.ignoresSafeArea()
-
-                    // Image layer
-                    imageView
-                        .background(
-                            GeometryReader { imageGeometry in
-                                Color.clear.onAppear {
-                                    updateImageMetrics(imageFrame: imageGeometry.frame(in: .named("container")))
-                                }
-                                .onChange(of: geometry.size) { _, _ in
-                                    // Small delay to let layout settle
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        updateImageMetrics(imageFrame: imageGeometry.frame(in: .named("container")))
-                                    }
-                                }
-                            }
-                        )
-
-                    // Crop overlay
-                    if imageDisplaySize.width > 0 && imagePixelSize.width > 0 {
-                        cropOverlay(containerSize: geometry.size)
+            mainContent
+                .navigationTitle("Crop Image")
+                #if os(macOS)
+                .frame(minWidth: 600, minHeight: 600)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") { onCancel() }
+                    }
+                    ToolbarItem(placement: .automatic) {
+                        Button {
+                            showHeadModel.toggle()
+                        } label: {
+                            Label(
+                                showHeadModel ? "Hide Angle" : "Set Angle",
+                                systemImage: "rotate.3d"
+                            )
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            // Only pass head rotation if it's been modified from zero
+                            let headRot = (headRotation.yaw != 0 || headRotation.pitch != 0 || headRotation.roll != 0) ? headRotation : nil
+                            onConfirm(cropRect, rotation, headRot)
+                        }
                     }
                 }
-                .coordinateSpace(name: "container")
-            }
-            .navigationTitle("Crop Image")
-            #if os(macOS)
-            .frame(minWidth: 500, minHeight: 600)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { onCancel() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { onConfirm(cropRect, rotation) }
-                }
-            }
         }
         .onAppear {
             loadImageDimensions()
         }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        #if os(macOS)
+        HStack(spacing: 0) {
+            cropInterface
+            if showHeadModel {
+                headRotationPanel
+                    .frame(width: 220)
+            }
+        }
+        #else
+        ZStack {
+            cropInterface
+            if showHeadModel {
+                VStack {
+                    Spacer()
+                    headRotationCompact
+                        .padding()
+                }
+            }
+        }
+        #endif
+    }
+
+    private var cropInterface: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                imageView
+                    .background(
+                        GeometryReader { imageGeometry in
+                            Color.clear.onAppear {
+                                updateImageMetrics(imageFrame: imageGeometry.frame(in: .named("container")))
+                            }
+                            .onChange(of: geometry.size) { _, _ in
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    updateImageMetrics(imageFrame: imageGeometry.frame(in: .named("container")))
+                                }
+                            }
+                        }
+                    )
+
+                if imageDisplaySize.width > 0 && imagePixelSize.width > 0 {
+                    cropOverlay(containerSize: geometry.size)
+                }
+            }
+            .coordinateSpace(name: "container")
+        }
+    }
+
+    // MARK: - Head Rotation Views
+
+    private var headRotationPanel: some View {
+        VStack(spacing: 16) {
+            Text("Match Head Angle")
+                .font(.headline)
+
+            Text("Rotate to match your photo's viewing angle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            HeadModelView(
+                rotation: $headRotation,
+                isInteractive: true,
+                showResetButton: true
+            )
+            .frame(height: 180)
+
+            // Show current angles
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Yaw:")
+                    Spacer()
+                    Text("\(Int(headRotation.yaw))°")
+                }
+                HStack {
+                    Text("Pitch:")
+                    Spacer()
+                    Text("\(Int(headRotation.pitch))°")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .padding()
+        .background(Color(white: 0.15))
+    }
+
+    private var headRotationCompact: some View {
+        HStack(spacing: 12) {
+            HeadModelView(
+                rotation: $headRotation,
+                isInteractive: true,
+                showResetButton: false
+            )
+            .frame(width: 100, height: 100)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Head Angle")
+                    .font(.caption.bold())
+                Text("Y: \(Int(headRotation.yaw))° P: \(Int(headRotation.pitch))°")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Reset") {
+                    headRotation = .zero
+                }
+                .font(.caption)
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder

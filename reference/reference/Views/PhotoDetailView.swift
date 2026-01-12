@@ -35,10 +35,13 @@ struct PhotoDetailView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingTagEditor = false
     @State private var showingCropEditor = false
+    @State private var showingAngleEditor = false
     @State private var showingAddAnotherCrop = false
     @State private var showingAddAnotherTagSheet = false
     @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var pendingCropRotation: Double = 0.0
+    @State private var pendingHeadRotation: HeadRotation?
+    @State private var editingHeadRotation: HeadRotation = .zero
     @State private var newTagName = ""
 
     var body: some View {
@@ -125,6 +128,60 @@ struct PhotoDetailView: View {
                     }
                     .padding(.horizontal)
 
+                    // Head Angle section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Head Angle")
+                                .font(.headline)
+                            Spacer()
+                            if photo.hasHeadRotation {
+                                Button {
+                                    editingHeadRotation = photo.headRotation ?? .zero
+                                    showingAngleEditor = true
+                                } label: {
+                                    Label("Edit", systemImage: "pencil")
+                                        .font(.subheadline)
+                                }
+                            } else {
+                                Button {
+                                    editingHeadRotation = .zero
+                                    showingAngleEditor = true
+                                } label: {
+                                    Label("Set Angle", systemImage: "plus")
+                                        .font(.subheadline)
+                                }
+                            }
+                        }
+
+                        if let rotation = photo.headRotation {
+                            HStack(spacing: 16) {
+                                HeadModelView(
+                                    rotation: .constant(rotation),
+                                    isInteractive: false,
+                                    showResetButton: false
+                                )
+                                .frame(width: 80, height: 80)
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Yaw: \(Int(rotation.yaw))°")
+                                    Text("Pitch: \(Int(rotation.pitch))°")
+                                    if rotation.roll != 0 {
+                                        Text("Roll: \(Int(rotation.roll))°")
+                                    }
+                                }
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+
+                                Spacer()
+                            }
+                        } else {
+                            Text("No angle set")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        }
+                    }
+                    .padding(.horizontal)
+
                     // Metadata
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Added")
@@ -181,11 +238,13 @@ struct PhotoDetailView: View {
                     imageData: data,
                     initialCropRect: photo.cropRect,
                     initialRotation: photo.cropRotation,
-                    onConfirm: { newCropRect, newRotation in
+                    initialHeadRotation: photo.headRotation,
+                    onConfirm: { newCropRect, newRotation, newHeadRotation in
                         photo.cropX = newCropRect.origin.x
                         photo.cropY = newCropRect.origin.y
                         photo.cropSize = newCropRect.width
                         photo.cropRotation = newRotation
+                        photo.headRotation = newHeadRotation
                         showingCropEditor = false
                     },
                     onCancel: {
@@ -200,9 +259,11 @@ struct PhotoDetailView: View {
                     imageData: data,
                     initialCropRect: CGRect(x: 0, y: 0, width: 1, height: 1),
                     initialRotation: 0.0,
-                    onConfirm: { cropRect, rotation in
+                    initialHeadRotation: nil,
+                    onConfirm: { cropRect, rotation, headRotation in
                         pendingCropRect = cropRect
                         pendingCropRotation = rotation
+                        pendingHeadRotation = headRotation
                         showingAddAnotherCrop = false
                         showingAddAnotherTagSheet = true
                     },
@@ -222,11 +283,13 @@ struct PhotoDetailView: View {
                         saveAnotherCrop(tags: selectedTags)
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                     },
                     onSaveAndAddAnother: { selectedTags in
                         saveAnotherCrop(tags: selectedTags)
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                         showingAddAnotherTagSheet = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                             showingAddAnotherCrop = true
@@ -235,9 +298,22 @@ struct PhotoDetailView: View {
                     onCancel: {
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
+                        pendingHeadRotation = nil
                     }
                 )
             }
+        }
+        .sheet(isPresented: $showingAngleEditor) {
+            HeadAngleEditorSheet(
+                rotation: $editingHeadRotation,
+                onSave: {
+                    photo.headRotation = editingHeadRotation
+                    showingAngleEditor = false
+                },
+                onCancel: {
+                    showingAngleEditor = false
+                }
+            )
         }
     }
 
@@ -313,7 +389,10 @@ struct PhotoDetailView: View {
             cropX: pendingCropRect.origin.x,
             cropY: pendingCropRect.origin.y,
             cropSize: pendingCropRect.width,
-            cropRotation: pendingCropRotation
+            cropRotation: pendingCropRotation,
+            headYaw: pendingHeadRotation?.yaw,
+            headPitch: pendingHeadRotation?.pitch,
+            headRoll: pendingHeadRotation?.roll
         )
         newPhoto.tags = tags
         modelContext.insert(newPhoto)
@@ -421,6 +500,69 @@ struct TagEditorSheet: View {
         }
 
         newTagName = ""
+    }
+}
+
+struct HeadAngleEditorSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var rotation: HeadRotation
+    let onSave: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Text("Adjust the head to match your photo's viewing angle")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
+                HeadModelView(
+                    rotation: $rotation,
+                    isInteractive: true,
+                    showResetButton: true
+                )
+                .frame(maxHeight: 300)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Yaw (left/right):")
+                        Spacer()
+                        Text("\(Int(rotation.yaw))°")
+                    }
+                    HStack {
+                        Text("Pitch (up/down):")
+                        Spacer()
+                        Text("\(Int(rotation.pitch))°")
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+                Spacer()
+            }
+            .padding(.top)
+            .navigationTitle("Set Head Angle")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave()
+                        dismiss()
+                    }
+                }
+            }
+        }
+        #if os(macOS)
+        .frame(minWidth: 400, minHeight: 500)
+        #endif
     }
 }
 
