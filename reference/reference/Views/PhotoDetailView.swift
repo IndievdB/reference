@@ -11,6 +11,10 @@ struct PhotoDetailView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingTagEditor = false
     @State private var showingCropEditor = false
+    @State private var showingAddAnotherCrop = false
+    @State private var showingAddAnotherTagSheet = false
+    @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    @State private var pendingCropRotation: Double = 0.0
     @State private var newTagName = ""
 
     var body: some View {
@@ -50,9 +54,15 @@ struct PhotoDetailView: View {
                                 .font(.headline)
                             Spacer()
                             Button {
+                                showingAddAnotherCrop = true
+                            } label: {
+                                Label("Add Another", systemImage: "plus.square.on.square")
+                                    .font(.subheadline)
+                            }
+                            Button {
                                 showingCropEditor = true
                             } label: {
-                                Label("Edit Crop", systemImage: "crop")
+                                Label("Edit", systemImage: "crop")
                                     .font(.subheadline)
                             }
                         }
@@ -143,6 +153,51 @@ struct PhotoDetailView: View {
                 )
             }
         }
+        .sheet(isPresented: $showingAddAnotherCrop) {
+            if let data = PhotoStorageService.loadImageData(filename: photo.filename) {
+                CropView(
+                    imageData: data,
+                    initialCropRect: CGRect(x: 0, y: 0, width: 1, height: 1),
+                    initialRotation: 0.0,
+                    onConfirm: { cropRect, rotation in
+                        pendingCropRect = cropRect
+                        pendingCropRotation = rotation
+                        showingAddAnotherCrop = false
+                        showingAddAnotherTagSheet = true
+                    },
+                    onCancel: {
+                        showingAddAnotherCrop = false
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingAddAnotherTagSheet) {
+            if let data = PhotoStorageService.loadImageData(filename: photo.filename),
+               let croppedData = ImageCropService.applyCrop(to: data, cropRect: pendingCropRect, rotation: pendingCropRotation) {
+                TagSelectionSheet(
+                    imageData: croppedData,
+                    availableTags: allTags,
+                    onSave: { selectedTags in
+                        saveAnotherCrop(tags: selectedTags)
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
+                    },
+                    onSaveAndAddAnother: { selectedTags in
+                        saveAnotherCrop(tags: selectedTags)
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
+                        showingAddAnotherTagSheet = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingAddAnotherCrop = true
+                        }
+                    },
+                    onCancel: {
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
+                    }
+                )
+            }
+        }
     }
 
     private var photoPlaceholder: some View {
@@ -159,9 +214,21 @@ struct PhotoDetailView: View {
     private func deletePhoto() {
         // Get tags before deleting photo
         let tagsToCheck = photo.tags
+        let filename = photo.filename
 
-        PhotoStorageService.deleteImage(filename: photo.filename)
+        // Check if other photos share this source file
+        let descriptor = FetchDescriptor<Photo>(
+            predicate: #Predicate { $0.filename == filename }
+        )
+        let photosWithSameFile = (try? modelContext.fetchCount(descriptor)) ?? 0
+
+        // Delete the photo record
         modelContext.delete(photo)
+
+        // Only delete the file if this was the last photo using it
+        if photosWithSameFile <= 1 {
+            PhotoStorageService.deleteImage(filename: filename)
+        }
 
         // Remove any tags that now have no photos
         for tag in tagsToCheck {
@@ -171,6 +238,19 @@ struct PhotoDetailView: View {
         }
 
         dismiss()
+    }
+
+    private func saveAnotherCrop(tags: [Tag]) {
+        // Create new photo with same source file but different crop
+        let newPhoto = Photo(
+            filename: photo.filename,
+            cropX: pendingCropRect.origin.x,
+            cropY: pendingCropRect.origin.y,
+            cropSize: pendingCropRect.width,
+            cropRotation: pendingCropRotation
+        )
+        newPhoto.tags = tags
+        modelContext.insert(newPhoto)
     }
 }
 

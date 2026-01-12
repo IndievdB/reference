@@ -8,6 +8,7 @@ struct TagSelectionSheet: View {
     let imageData: Data
     let availableTags: [Tag]
     let onSave: ([Tag]) -> Void
+    let onSaveAndAddAnother: (([Tag]) -> Void)?
     let onCancel: () -> Void
 
     @State private var selectedTagIds: Set<UUID> = []
@@ -35,10 +36,19 @@ struct TagSelectionSheet: View {
                         }
                     }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            let selectedTags = availableTags.filter { selectedTagIds.contains($0.id) }
-                            onSave(selectedTags)
-                            dismiss()
+                        HStack(spacing: 12) {
+                            if onSaveAndAddAnother != nil {
+                                Button("Save & Add Another") {
+                                    let selectedTags = availableTags.filter { selectedTagIds.contains($0.id) }
+                                    onSaveAndAddAnother?(selectedTags)
+                                    dismiss()
+                                }
+                            }
+                            Button("Save") {
+                                let selectedTags = availableTags.filter { selectedTagIds.contains($0.id) }
+                                onSave(selectedTags)
+                                dismiss()
+                            }
                         }
                     }
                 }

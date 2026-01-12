@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import PhotosUI
 import UniformTypeIdentifiers
 
 struct GalleryView: View {
@@ -9,13 +8,12 @@ struct GalleryView: View {
     @Query(sort: \Tag.name) private var allTags: [Tag]
 
     @State private var selectedTag: Tag?
-    @State private var showingPhotoPicker = false
-    @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showingCropView = false
     @State private var showingTagSheet = false
     @State private var pendingImageData: Data?
     @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var pendingCropRotation: Double = 0.0
+    @State private var pendingFilename: String?  // Reuse for multiple crops from same source
     @State private var showingFileImporter = false
     @State private var isDropTargeted = false
 
@@ -68,15 +66,8 @@ struct GalleryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Menu {
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                        Label("From Photos Library", systemImage: "photo.on.rectangle")
-                    }
-                    Button {
-                        showingFileImporter = true
-                    } label: {
-                        Label("From Files", systemImage: "folder")
-                    }
+                Button {
+                    showingFileImporter = true
                 } label: {
                     Label("Add Photo", systemImage: "plus")
                 }
@@ -102,17 +93,6 @@ struct GalleryView: View {
             handleDrop(providers: providers)
             return true
         }
-        .onChange(of: selectedPhotoItem) { oldValue, newValue in
-            Task {
-                if let data = try? await newValue?.loadTransferable(type: Data.self) {
-                    pendingImageData = data
-                    pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
-                    pendingCropRotation = 0.0
-                    showingCropView = true
-                }
-                selectedPhotoItem = nil
-            }
-        }
         .sheet(isPresented: $showingCropView) {
             if let imageData = pendingImageData {
                 CropView(
@@ -127,6 +107,7 @@ struct GalleryView: View {
                     },
                     onCancel: {
                         pendingImageData = nil
+                        pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
                         showingCropView = false
@@ -142,12 +123,26 @@ struct GalleryView: View {
                     availableTags: allTags,
                     onSave: { selectedTags in
                         savePhoto(data: imageData, tags: selectedTags)
+                        // Clear all pending state - we're done
                         pendingImageData = nil
+                        pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
                     },
+                    onSaveAndAddAnother: { selectedTags in
+                        savePhoto(data: imageData, tags: selectedTags)
+                        // Keep pendingImageData and pendingFilename for reuse
+                        pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
+                        showingTagSheet = false
+                        // Small delay to allow sheet dismissal before showing crop view
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showingCropView = true
+                        }
+                    },
                     onCancel: {
                         pendingImageData = nil
+                        pendingFilename = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
                         pendingCropRotation = 0.0
                     }
@@ -157,7 +152,15 @@ struct GalleryView: View {
     }
 
     private func savePhoto(data: Data, tags: [Tag]) {
-        guard let filename = PhotoStorageService.saveImage(data) else { return }
+        // Reuse existing filename or create new one
+        let filename: String
+        if let existing = pendingFilename {
+            filename = existing
+        } else {
+            guard let newFilename = PhotoStorageService.saveImage(data) else { return }
+            filename = newFilename
+            pendingFilename = newFilename  // Store for reuse
+        }
 
         let photo = Photo(
             filename: filename,
