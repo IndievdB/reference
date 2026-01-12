@@ -9,11 +9,13 @@ import UIKit
 struct CropView: View {
     let imageData: Data
     let initialCropRect: CGRect
-    let onConfirm: (CGRect) -> Void
+    let initialRotation: Double
+    let onConfirm: (CGRect, Double) -> Void  // Returns cropRect and rotation
     let onCancel: () -> Void
 
     // Crop state - stored as normalized values where cropSize is relative to shorter image dimension
     @State private var cropRect: CGRect
+    @State private var rotation: Double  // Rotation in degrees
 
     // Image metrics
     @State private var imagePixelSize: CGSize = .zero  // Actual pixel dimensions
@@ -22,6 +24,8 @@ struct CropView: View {
 
     // Drag state
     @State private var dragStartCropRect: CGRect?
+    @State private var dragStartRotation: Double?
+    @State private var dragStartAngle: Double?
 
     enum Corner: CaseIterable {
         case topLeft, topRight, bottomLeft, bottomRight
@@ -36,14 +40,17 @@ struct CropView: View {
     init(
         imageData: Data,
         initialCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1),
-        onConfirm: @escaping (CGRect) -> Void,
+        initialRotation: Double = 0.0,
+        onConfirm: @escaping (CGRect, Double) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.imageData = imageData
         self.initialCropRect = initialCropRect
+        self.initialRotation = initialRotation
         self.onConfirm = onConfirm
         self.onCancel = onCancel
         self._cropRect = State(initialValue: initialCropRect)
+        self._rotation = State(initialValue: initialRotation)
     }
 
     var body: some View {
@@ -84,7 +91,7 @@ struct CropView: View {
                     Button("Cancel") { onCancel() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { onConfirm(cropRect) }
+                    Button("Done") { onConfirm(cropRect, rotation) }
                 }
             }
         }
@@ -129,53 +136,134 @@ struct CropView: View {
 
     private func cropOverlay(containerSize: CGSize) -> some View {
         let screenCropRect = normalizedToScreen(cropRect)
+        let center = CGPoint(x: screenCropRect.midX, y: screenCropRect.midY)
+        let width = screenCropRect.width
+        let height = screenCropRect.height
 
         return ZStack {
-            // Dimmed overlay outside crop
-            DimmedCropOverlay(cropFrame: screenCropRect, containerSize: containerSize)
+            // Dimmed overlay outside crop (with rotated cutout)
+            DimmedCropOverlay(cropFrame: screenCropRect, containerSize: containerSize, rotation: rotation)
 
-            // Crop border
-            Rectangle()
-                .stroke(Color.white, lineWidth: 2)
-                .frame(width: screenCropRect.width, height: screenCropRect.height)
-                .position(x: screenCropRect.midX, y: screenCropRect.midY)
+            // Rotated crop box group - all elements positioned relative to center (0,0)
+            ZStack {
+                // Crop border
+                Rectangle()
+                    .stroke(Color.white, lineWidth: 2)
+                    .frame(width: width, height: height)
 
-            // Grid lines
-            CropGridOverlay(frame: screenCropRect)
+                // Grid lines
+                gridLines(width: width, height: height)
 
-            // Corner handles
-            ForEach(Corner.allCases, id: \.self) { corner in
-                cornerHandle(corner: corner, screenCropRect: screenCropRect)
+                // Corner handles - positioned relative to center
+                cornerHandleView(xOffset: -width/2, yOffset: -height/2, corner: .topLeft)
+                cornerHandleView(xOffset: width/2, yOffset: -height/2, corner: .topRight)
+                cornerHandleView(xOffset: -width/2, yOffset: height/2, corner: .bottomLeft)
+                cornerHandleView(xOffset: width/2, yOffset: height/2, corner: .bottomRight)
+
+                // Center drag area
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+                    .frame(width: max(0, width - 60), height: max(0, height - 60))
+                    .gesture(boxDragGesture(coordinateSpace: .named("container")))
+
+                // Rotation handle at top center
+                rotationHandleView(cropHeight: height)
             }
-
-            // Center drag area
-            Rectangle()
-                .fill(Color.white.opacity(0.001))
-                .frame(width: max(0, screenCropRect.width - 60), height: max(0, screenCropRect.height - 60))
-                .position(x: screenCropRect.midX, y: screenCropRect.midY)
-                .gesture(boxDragGesture())
+            .rotationEffect(.degrees(rotation))
+            .position(center)
         }
     }
 
-    private func cornerHandle(corner: Corner, screenCropRect: CGRect) -> some View {
-        let position = cornerPosition(corner: corner, in: screenCropRect)
+    private func gridLines(width: CGFloat, height: CGFloat) -> some View {
+        Canvas { context, size in
+            let thirdW = size.width / 3
+            let thirdH = size.height / 3
+
+            var path = Path()
+            // Vertical lines
+            path.move(to: CGPoint(x: thirdW, y: 0))
+            path.addLine(to: CGPoint(x: thirdW, y: size.height))
+            path.move(to: CGPoint(x: thirdW * 2, y: 0))
+            path.addLine(to: CGPoint(x: thirdW * 2, y: size.height))
+
+            // Horizontal lines
+            path.move(to: CGPoint(x: 0, y: thirdH))
+            path.addLine(to: CGPoint(x: size.width, y: thirdH))
+            path.move(to: CGPoint(x: 0, y: thirdH * 2))
+            path.addLine(to: CGPoint(x: size.width, y: thirdH * 2))
+
+            context.stroke(path, with: .color(.white.opacity(0.4)), lineWidth: 1)
+        }
+        .frame(width: width, height: height)
+        .allowsHitTesting(false)
+    }
+
+    private func cornerHandleView(xOffset: CGFloat, yOffset: CGFloat, corner: Corner) -> some View {
         let handleSize: CGFloat = 24
 
         return Circle()
             .fill(Color.white)
             .frame(width: handleSize, height: handleSize)
             .shadow(radius: 2)
-            .position(position)
-            .gesture(cornerDragGesture(corner: corner))
+            .offset(x: xOffset, y: yOffset)
+            .gesture(cornerDragGesture(corner: corner, coordinateSpace: .named("container")))
     }
 
-    private func cornerPosition(corner: Corner, in rect: CGRect) -> CGPoint {
-        switch corner {
-        case .topLeft: return CGPoint(x: rect.minX, y: rect.minY)
-        case .topRight: return CGPoint(x: rect.maxX, y: rect.minY)
-        case .bottomLeft: return CGPoint(x: rect.minX, y: rect.maxY)
-        case .bottomRight: return CGPoint(x: rect.maxX, y: rect.maxY)
+    private func rotationHandleView(cropHeight: CGFloat) -> some View {
+        let handleOffset = cropHeight / 2 + 30
+
+        return VStack(spacing: 4) {
+            // Line connecting to crop box
+            Rectangle()
+                .fill(Color.white.opacity(0.6))
+                .frame(width: 2, height: 20)
+
+            // Rotation handle circle
+            Circle()
+                .fill(Color.white)
+                .frame(width: 28, height: 28)
+                .overlay {
+                    Image(systemName: "rotate.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.black)
+                }
+                .shadow(radius: 2)
         }
+        .offset(y: -handleOffset)
+        .gesture(rotationDragGesture(coordinateSpace: .named("container")))
+    }
+
+    private func rotationDragGesture(coordinateSpace: CoordinateSpace) -> some Gesture {
+        DragGesture(coordinateSpace: coordinateSpace)
+            .onChanged { value in
+                // Get crop center in container coordinates
+                let screenCropRect = normalizedToScreen(cropRect)
+                let center = CGPoint(x: screenCropRect.midX, y: screenCropRect.midY)
+
+                if dragStartRotation == nil {
+                    dragStartRotation = rotation
+                    // Calculate initial angle from center to start location
+                    let dx = Double(value.startLocation.x - center.x)
+                    let dy = Double(value.startLocation.y - center.y)
+                    dragStartAngle = atan2(dy, dx) * 180.0 / Double.pi
+                }
+
+                guard let startRotation = dragStartRotation,
+                      let startAngle = dragStartAngle else { return }
+
+                // Calculate current angle from center to current location
+                let dx = Double(value.location.x - center.x)
+                let dy = Double(value.location.y - center.y)
+                let currentAngle = atan2(dy, dx) * 180.0 / Double.pi
+
+                // Calculate rotation delta
+                let delta = currentAngle - startAngle
+                rotation = startRotation + delta
+            }
+            .onEnded { _ in
+                dragStartRotation = nil
+                dragStartAngle = nil
+            }
     }
 
     // MARK: - Gestures
@@ -191,8 +279,8 @@ struct CropView: View {
         }
     }
 
-    private func cornerDragGesture(corner: Corner) -> some Gesture {
-        DragGesture()
+    private func cornerDragGesture(corner: Corner, coordinateSpace: CoordinateSpace) -> some Gesture {
+        DragGesture(coordinateSpace: coordinateSpace)
             .onChanged { value in
                 if dragStartCropRect == nil {
                     dragStartCropRect = cropRect
@@ -200,67 +288,90 @@ struct CropView: View {
 
                 guard let startRect = dragStartCropRect else { return }
 
-                // Calculate the anchored corner position (opposite to the one being dragged)
-                let startDims = normalizedCropDimensions(for: startRect.width)
-                let anchorX: CGFloat
-                let anchorY: CGFloat
+                // Calculate anchor position on screen (accounting for rotation)
+                let screenCropRect = normalizedToScreen(startRect)
+                let center = CGPoint(x: screenCropRect.midX, y: screenCropRect.midY)
+                let halfSize = screenCropRect.width / 2  // Square crop
+                let rotationRad = rotation * Double.pi / 180.0
+                let cosR = CGFloat(cos(rotationRad))
+                let sinR = CGFloat(sin(rotationRad))
 
+                // Local offset of anchor corner (opposite to dragged corner)
+                let anchorLocalX: CGFloat
+                let anchorLocalY: CGFloat
                 switch corner {
                 case .topLeft:
-                    // Anchor is bottom-right
-                    anchorX = startRect.origin.x + startDims.width
-                    anchorY = startRect.origin.y + startDims.height
+                    anchorLocalX = halfSize
+                    anchorLocalY = halfSize
                 case .topRight:
-                    // Anchor is bottom-left
-                    anchorX = startRect.origin.x
-                    anchorY = startRect.origin.y + startDims.height
+                    anchorLocalX = -halfSize
+                    anchorLocalY = halfSize
                 case .bottomLeft:
-                    // Anchor is top-right
-                    anchorX = startRect.origin.x + startDims.width
-                    anchorY = startRect.origin.y
+                    anchorLocalX = halfSize
+                    anchorLocalY = -halfSize
                 case .bottomRight:
-                    // Anchor is top-left
-                    anchorX = startRect.origin.x
-                    anchorY = startRect.origin.y
+                    anchorLocalX = -halfSize
+                    anchorLocalY = -halfSize
                 }
 
-                // Determine size change based on drag direction
-                var sizeDelta: CGFloat = 0
+                // Rotate local offset to get screen position of anchor
+                let anchorScreenX = center.x + anchorLocalX * cosR - anchorLocalY * sinR
+                let anchorScreenY = center.y + anchorLocalX * sinR + anchorLocalY * cosR
+
+                // Calculate distance from start location to anchor
+                let startDist = hypot(value.startLocation.x - anchorScreenX, value.startLocation.y - anchorScreenY)
+                // Calculate distance from current location to anchor
+                let currentDist = hypot(value.location.x - anchorScreenX, value.location.y - anchorScreenY)
+
+                // Size change is proportional to distance change from anchor
+                let distChange = currentDist - startDist
                 let shorterDisplayDim = min(imageDisplaySize.width, imageDisplaySize.height)
-
-                switch corner {
-                case .topLeft:
-                    sizeDelta = -max(value.translation.width, value.translation.height) / shorterDisplayDim
-                case .topRight:
-                    sizeDelta = max(value.translation.width, -value.translation.height) / shorterDisplayDim
-                case .bottomLeft:
-                    sizeDelta = max(-value.translation.width, value.translation.height) / shorterDisplayDim
-                case .bottomRight:
-                    sizeDelta = max(value.translation.width, value.translation.height) / shorterDisplayDim
-                }
+                let sizeDelta = distChange / shorterDisplayDim
 
                 // Calculate new size
                 let newSize = max(0.1, min(1.0, startRect.width + sizeDelta))
-                let newDims = normalizedCropDimensions(for: newSize)
 
-                // Calculate new origin to keep anchor point fixed
-                var newX: CGFloat
-                var newY: CGFloat
+                // Calculate new screen half-size
+                let shorterPixelDim = min(imagePixelSize.width, imagePixelSize.height)
+                let scale = min(imageDisplaySize.width / imagePixelSize.width, imageDisplaySize.height / imagePixelSize.height)
+                let newScreenHalfSize = (newSize * shorterPixelDim * scale) / 2
 
+                // Calculate new anchor offset with new size (same corner, but scaled)
+                let newAnchorLocalX: CGFloat
+                let newAnchorLocalY: CGFloat
                 switch corner {
                 case .topLeft:
-                    newX = anchorX - newDims.width
-                    newY = anchorY - newDims.height
+                    newAnchorLocalX = newScreenHalfSize
+                    newAnchorLocalY = newScreenHalfSize
                 case .topRight:
-                    newX = anchorX
-                    newY = anchorY - newDims.height
+                    newAnchorLocalX = -newScreenHalfSize
+                    newAnchorLocalY = newScreenHalfSize
                 case .bottomLeft:
-                    newX = anchorX - newDims.width
-                    newY = anchorY
+                    newAnchorLocalX = newScreenHalfSize
+                    newAnchorLocalY = -newScreenHalfSize
                 case .bottomRight:
-                    newX = anchorX
-                    newY = anchorY
+                    newAnchorLocalX = -newScreenHalfSize
+                    newAnchorLocalY = -newScreenHalfSize
                 }
+
+                // Rotate new anchor offset
+                let newAnchorOffsetX = newAnchorLocalX * cosR - newAnchorLocalY * sinR
+                let newAnchorOffsetY = newAnchorLocalX * sinR + newAnchorLocalY * cosR
+
+                // Calculate where center should be to keep anchor at same screen position
+                let newCenterScreenX = anchorScreenX - newAnchorOffsetX
+                let newCenterScreenY = anchorScreenY - newAnchorOffsetY
+
+                // Convert screen center to normalized origin
+                let newDims = normalizedCropDimensions(for: newSize)
+
+                // Screen center to pixel center
+                let centerPixelX = (newCenterScreenX - imageOffset.x) / scale
+                let centerPixelY = (newCenterScreenY - imageOffset.y) / scale
+
+                // Pixel center to normalized origin
+                let newX = (centerPixelX - (newDims.width * imagePixelSize.width) / 2) / imagePixelSize.width
+                let newY = (centerPixelY - (newDims.height * imagePixelSize.height) / 2) / imagePixelSize.height
 
                 cropRect = constrainCropRect(CGRect(x: newX, y: newY, width: newSize, height: newSize))
             }
@@ -269,8 +380,8 @@ struct CropView: View {
             }
     }
 
-    private func boxDragGesture() -> some Gesture {
-        DragGesture()
+    private func boxDragGesture(coordinateSpace: CoordinateSpace) -> some Gesture {
+        DragGesture(coordinateSpace: coordinateSpace)
             .onChanged { value in
                 if dragStartCropRect == nil {
                     dragStartCropRect = cropRect
@@ -278,7 +389,8 @@ struct CropView: View {
 
                 guard let startRect = dragStartCropRect else { return }
 
-                // Convert screen translation to normalized coordinates
+                // Translation is now in container space (not rotated)
+                // Convert directly to normalized coordinates
                 let deltaX = value.translation.width / imageDisplaySize.width
                 let deltaY = value.translation.height / imageDisplaySize.height
 
@@ -355,6 +467,7 @@ struct CropView: View {
 struct DimmedCropOverlay: View {
     let cropFrame: CGRect
     let containerSize: CGSize
+    var rotation: Double = 0.0
 
     var body: some View {
         Canvas { context, size in
@@ -364,38 +477,19 @@ struct DimmedCropOverlay: View {
                 with: .color(.black.opacity(0.6))
             )
 
-            // Cut out the crop area
+            // Cut out the crop area with rotation
             context.blendMode = .destinationOut
-            context.fill(
-                Path(cropFrame),
-                with: .color(.white)
-            )
+
+            // Create rotated rect path
+            var transform = CGAffineTransform.identity
+            transform = transform.translatedBy(x: cropFrame.midX, y: cropFrame.midY)
+            transform = transform.rotated(by: rotation * .pi / 180)
+            transform = transform.translatedBy(x: -cropFrame.midX, y: -cropFrame.midY)
+
+            let rotatedPath = Path(cropFrame).applying(transform)
+            context.fill(rotatedPath, with: .color(.white))
         }
         .allowsHitTesting(false)
     }
 }
 
-struct CropGridOverlay: View {
-    let frame: CGRect
-
-    var body: some View {
-        Path { path in
-            let thirdWidth = frame.width / 3
-            let thirdHeight = frame.height / 3
-
-            // Vertical lines
-            path.move(to: CGPoint(x: frame.minX + thirdWidth, y: frame.minY))
-            path.addLine(to: CGPoint(x: frame.minX + thirdWidth, y: frame.maxY))
-            path.move(to: CGPoint(x: frame.minX + thirdWidth * 2, y: frame.minY))
-            path.addLine(to: CGPoint(x: frame.minX + thirdWidth * 2, y: frame.maxY))
-
-            // Horizontal lines
-            path.move(to: CGPoint(x: frame.minX, y: frame.minY + thirdHeight))
-            path.addLine(to: CGPoint(x: frame.maxX, y: frame.minY + thirdHeight))
-            path.move(to: CGPoint(x: frame.minX, y: frame.minY + thirdHeight * 2))
-            path.addLine(to: CGPoint(x: frame.maxX, y: frame.minY + thirdHeight * 2))
-        }
-        .stroke(Color.white.opacity(0.4), lineWidth: 1)
-        .allowsHitTesting(false)
-    }
-}

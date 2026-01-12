@@ -15,6 +15,7 @@ struct GalleryView: View {
     @State private var showingTagSheet = false
     @State private var pendingImageData: Data?
     @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+    @State private var pendingCropRotation: Double = 0.0
     @State private var showingFileImporter = false
     @State private var isDropTargeted = false
 
@@ -106,6 +107,7 @@ struct GalleryView: View {
                 if let data = try? await newValue?.loadTransferable(type: Data.self) {
                     pendingImageData = data
                     pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    pendingCropRotation = 0.0
                     showingCropView = true
                 }
                 selectedPhotoItem = nil
@@ -116,14 +118,17 @@ struct GalleryView: View {
                 CropView(
                     imageData: imageData,
                     initialCropRect: pendingCropRect,
-                    onConfirm: { cropRect in
+                    initialRotation: pendingCropRotation,
+                    onConfirm: { cropRect, rotation in
                         pendingCropRect = cropRect
+                        pendingCropRotation = rotation
                         showingCropView = false
                         showingTagSheet = true
                     },
                     onCancel: {
                         pendingImageData = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
                         showingCropView = false
                     }
                 )
@@ -131,7 +136,7 @@ struct GalleryView: View {
         }
         .sheet(isPresented: $showingTagSheet) {
             if let imageData = pendingImageData,
-               let croppedData = ImageCropService.applyCrop(to: imageData, cropRect: pendingCropRect) {
+               let croppedData = ImageCropService.applyCrop(to: imageData, cropRect: pendingCropRect, rotation: pendingCropRotation) {
                 TagSelectionSheet(
                     imageData: croppedData,
                     availableTags: allTags,
@@ -139,10 +144,12 @@ struct GalleryView: View {
                         savePhoto(data: imageData, tags: selectedTags)
                         pendingImageData = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
                     },
                     onCancel: {
                         pendingImageData = nil
                         pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        pendingCropRotation = 0.0
                     }
                 )
             }
@@ -156,7 +163,8 @@ struct GalleryView: View {
             filename: filename,
             cropX: pendingCropRect.origin.x,
             cropY: pendingCropRect.origin.y,
-            cropSize: pendingCropRect.width
+            cropSize: pendingCropRect.width,
+            cropRotation: pendingCropRotation
         )
         photo.tags = tags
         modelContext.insert(photo)
@@ -173,6 +181,7 @@ struct GalleryView: View {
             if let data = try? Data(contentsOf: url) {
                 pendingImageData = data
                 pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                pendingCropRotation = 0.0
                 showingCropView = true
             }
         case .failure:
@@ -195,6 +204,7 @@ struct GalleryView: View {
                 DispatchQueue.main.async {
                     self.pendingImageData = imageData
                     self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    self.pendingCropRotation = 0.0
                     self.showingCropView = true
                 }
             }
@@ -211,6 +221,7 @@ struct GalleryView: View {
                     DispatchQueue.main.async {
                         self.pendingImageData = imageData
                         self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                        self.pendingCropRotation = 0.0
                         self.showingCropView = true
                     }
                 }
@@ -225,6 +236,7 @@ struct GalleryView: View {
                 DispatchQueue.main.async {
                     self.pendingImageData = data
                     self.pendingCropRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+                    self.pendingCropRotation = 0.0
                     self.showingCropView = true
                 }
             }
@@ -240,7 +252,7 @@ struct PhotoThumbnailView: View {
             .aspectRatio(1, contentMode: .fit)
             .overlay {
                 if let data = PhotoStorageService.loadImageData(filename: photo.filename),
-                   let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect) {
+                   let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect, rotation: photo.cropRotation) {
                     #if os(macOS)
                     if let nsImage = NSImage(data: croppedData) {
                         Image(nsImage: nsImage)

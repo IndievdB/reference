@@ -19,7 +19,7 @@ struct PhotoDetailView: View {
                 VStack(spacing: 16) {
                     // Full-size cropped image
                     if let data = PhotoStorageService.loadImageData(filename: photo.filename),
-                       let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect) {
+                       let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect, rotation: photo.cropRotation) {
                         #if os(macOS)
                         if let nsImage = NSImage(data: croppedData) {
                             Image(nsImage: nsImage)
@@ -129,10 +129,12 @@ struct PhotoDetailView: View {
                 CropView(
                     imageData: data,
                     initialCropRect: photo.cropRect,
-                    onConfirm: { newCropRect in
+                    initialRotation: photo.cropRotation,
+                    onConfirm: { newCropRect, newRotation in
                         photo.cropX = newCropRect.origin.x
                         photo.cropY = newCropRect.origin.y
                         photo.cropSize = newCropRect.width
+                        photo.cropRotation = newRotation
                         showingCropEditor = false
                     },
                     onCancel: {
