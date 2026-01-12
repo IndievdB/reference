@@ -62,7 +62,7 @@ struct GalleryView: View {
         }
         .navigationTitle("Reference")
         .navigationDestination(for: Photo.self) { photo in
-            PhotoDetailView(photo: photo)
+            PhotoDetailView(photo: photo, allPhotos: filteredPhotos)
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

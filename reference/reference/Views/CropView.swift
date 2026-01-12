@@ -146,10 +146,17 @@ struct CropView: View {
 
             // Rotated crop box group - all elements positioned relative to center (0,0)
             ZStack {
+                // Center drag area (bottom layer, so handles are on top)
+                Rectangle()
+                    .fill(Color.white.opacity(0.001))
+                    .frame(width: width, height: height)
+                    .gesture(boxDragGesture(coordinateSpace: .named("container")))
+
                 // Crop border
                 Rectangle()
                     .stroke(Color.white, lineWidth: 2)
                     .frame(width: width, height: height)
+                    .allowsHitTesting(false)
 
                 // Grid lines
                 gridLines(width: width, height: height)
@@ -159,12 +166,6 @@ struct CropView: View {
                 cornerHandleView(xOffset: width/2, yOffset: -height/2, corner: .topRight)
                 cornerHandleView(xOffset: -width/2, yOffset: height/2, corner: .bottomLeft)
                 cornerHandleView(xOffset: width/2, yOffset: height/2, corner: .bottomRight)
-
-                // Center drag area
-                Rectangle()
-                    .fill(Color.white.opacity(0.001))
-                    .frame(width: max(0, width - 60), height: max(0, height - 60))
-                    .gesture(boxDragGesture(coordinateSpace: .named("container")))
 
                 // Rotation handle at top center
                 rotationHandleView(cropHeight: height)

@@ -6,7 +6,31 @@ struct PhotoDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \Tag.name) private var allTags: [Tag]
 
-    @Bindable var photo: Photo
+    let allPhotos: [Photo]  // All photos in current filter context
+    @State private var currentPhotoId: UUID
+
+    private var currentIndex: Int? {
+        allPhotos.firstIndex(where: { $0.id == currentPhotoId })
+    }
+
+    private var photo: Photo {
+        allPhotos.first(where: { $0.id == currentPhotoId }) ?? allPhotos[0]
+    }
+
+    private var hasPrevious: Bool {
+        guard let index = currentIndex else { return false }
+        return index > 0
+    }
+
+    private var hasNext: Bool {
+        guard let index = currentIndex else { return false }
+        return index < allPhotos.count - 1
+    }
+
+    init(photo: Photo, allPhotos: [Photo]) {
+        self.allPhotos = allPhotos
+        self._currentPhotoId = State(initialValue: photo.id)
+    }
 
     @State private var showingDeleteConfirmation = false
     @State private var showingTagEditor = false
@@ -116,6 +140,23 @@ struct PhotoDetailView: View {
         }
         .navigationTitle("Photo")
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                HStack(spacing: 8) {
+                    Button {
+                        goToPrevious()
+                    } label: {
+                        Label("Previous", systemImage: "chevron.left")
+                    }
+                    .disabled(!hasPrevious)
+
+                    Button {
+                        goToNext()
+                    } label: {
+                        Label("Next", systemImage: "chevron.right")
+                    }
+                    .disabled(!hasNext)
+                }
+            }
             ToolbarItem(placement: .destructiveAction) {
                 Button(role: .destructive) {
                     showingDeleteConfirmation = true
@@ -211,10 +252,21 @@ struct PhotoDetailView: View {
             }
     }
 
+    private func goToPrevious() {
+        guard let index = currentIndex, index > 0 else { return }
+        currentPhotoId = allPhotos[index - 1].id
+    }
+
+    private func goToNext() {
+        guard let index = currentIndex, index < allPhotos.count - 1 else { return }
+        currentPhotoId = allPhotos[index + 1].id
+    }
+
     private func deletePhoto() {
         // Get tags before deleting photo
         let tagsToCheck = photo.tags
         let filename = photo.filename
+        let deletedIndex = currentIndex
 
         // Check if other photos share this source file
         let descriptor = FetchDescriptor<Photo>(
@@ -237,7 +289,21 @@ struct PhotoDetailView: View {
             }
         }
 
-        dismiss()
+        // Navigate to adjacent photo or dismiss if this was the last one
+        if let index = deletedIndex {
+            if index < allPhotos.count - 1 {
+                // Go to next (which shifts into current position after delete)
+                currentPhotoId = allPhotos[index + 1].id
+            } else if index > 0 {
+                // Go to previous
+                currentPhotoId = allPhotos[index - 1].id
+            } else {
+                // This was the only photo
+                dismiss()
+            }
+        } else {
+            dismiss()
+        }
     }
 
     private func saveAnotherCrop(tags: [Tag]) {
@@ -359,8 +425,9 @@ struct TagEditorSheet: View {
 }
 
 #Preview {
+    let photo = Photo(filename: "test.jpg")
     NavigationStack {
-        PhotoDetailView(photo: Photo(filename: "test.jpg"))
+        PhotoDetailView(photo: photo, allPhotos: [photo])
     }
     .modelContainer(for: [Photo.self, Tag.self], inMemory: true)
 }
