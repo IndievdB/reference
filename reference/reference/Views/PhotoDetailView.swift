@@ -251,6 +251,9 @@ struct PhotoDetailView: View {
                         showingCropEditor = false
                     }
                 )
+                #if os(macOS)
+                .presentationSizing(.fitted)
+                #endif
             }
         }
         .sheet(isPresented: $showingAddAnotherCrop) {
@@ -271,6 +274,9 @@ struct PhotoDetailView: View {
                         showingAddAnotherCrop = false
                     }
                 )
+                #if os(macOS)
+                .presentationSizing(.fitted)
+                #endif
             }
         }
         .sheet(isPresented: $showingAddAnotherTagSheet) {

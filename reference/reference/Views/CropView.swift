@@ -66,7 +66,8 @@ struct CropView: View {
             mainContent
                 .navigationTitle("Crop Image")
                 #if os(macOS)
-                .frame(minWidth: 600, minHeight: 600)
+                .frame(minWidth: 600, idealWidth: 900, maxWidth: .infinity,
+                       minHeight: 600, idealHeight: 700, maxHeight: .infinity)
                 #endif
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {

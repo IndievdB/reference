@@ -152,6 +152,9 @@ struct GalleryView: View {
                         showingCropView = false
                     }
                 )
+                #if os(macOS)
+                .presentationSizing(.fitted)
+                #endif
             }
         }
         .sheet(isPresented: $showingTagSheet) {
