@@ -6,8 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		678F6C8F2F14BF2C00A255D7 /* asaro.obj in Resources */ = {isa = PBXBuildFile; fileRef = 678F6C8E2F14BF2C00A255D7 /* asaro.obj */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		678F6C612F147F8A00A255D7 /* reference.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = reference.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		678F6C8E2F14BF2C00A255D7 /* asaro.obj */ = {isa = PBXFileReference; lastKnownFileType = text; path = asaro.obj; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -34,6 +39,7 @@
 			children = (
 				678F6C632F147F8A00A255D7 /* reference */,
 				678F6C622F147F8A00A255D7 /* Products */,
+				678F6C8E2F14BF2C00A255D7 /* asaro.obj */,
 			);
 			sourceTree = "<group>";
 		};
@@ -109,6 +115,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				678F6C8F2F14BF2C00A255D7 /* asaro.obj in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -248,6 +255,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = asaro.obj;
 				DEVELOPMENT_TEAM = 67ARSN9LGR;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -292,6 +300,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = asaro.obj;
 				DEVELOPMENT_TEAM = 67ARSN9LGR;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

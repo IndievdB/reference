@@ -38,6 +38,7 @@ struct PhotoDetailView: View {
     @State private var showingAngleEditor = false
     @State private var showingAddAnotherCrop = false
     @State private var showingAddAnotherTagSheet = false
+    @State private var showingRelighting = false
     @State private var pendingCropRect: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     @State private var pendingCropRotation: Double = 0.0
     @State private var pendingHeadRotation: HeadRotation?
@@ -93,6 +94,25 @@ struct PhotoDetailView: View {
                                     .font(.subheadline)
                             }
                         }
+                    }
+                    .padding(.horizontal)
+
+                    // Relight section
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text("Relight")
+                                .font(.headline)
+                            Spacer()
+                            Button {
+                                showingRelighting = true
+                            } label: {
+                                Label("Experiment", systemImage: "light.max")
+                                    .font(.subheadline)
+                            }
+                        }
+                        Text("Play with lighting direction and intensity")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.horizontal)
 
@@ -320,6 +340,14 @@ struct PhotoDetailView: View {
                     showingAngleEditor = false
                 }
             )
+        }
+        .sheet(isPresented: $showingRelighting) {
+            if let data = PhotoStorageService.loadImageData(filename: photo.filename),
+               let croppedData = ImageCropService.applyCrop(to: data, cropRect: photo.cropRect, rotation: photo.cropRotation) {
+                RelightingView(imageData: croppedData) {
+                    showingRelighting = false
+                }
+            }
         }
     }
 
