@@ -21,6 +21,8 @@ struct CropView: View {
     // Head rotation state
     @State private var headRotation: HeadRotation = .zero
     @State private var showHeadModel: Bool = true
+    @State private var isDetectingPose: Bool = false
+    @State private var detectionFailed: Bool = false
 
     // Image metrics
     @State private var imagePixelSize: CGSize = .zero  // Actual pixel dimensions
@@ -75,6 +77,19 @@ struct CropView: View {
                     }
                     ToolbarItem(placement: .automatic) {
                         Button {
+                            detectPose()
+                        } label: {
+                            if isDetectingPose {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Label("Detect", systemImage: "wand.and.stars")
+                            }
+                        }
+                        .disabled(isDetectingPose)
+                    }
+                    ToolbarItem(placement: .automatic) {
+                        Button {
                             showHeadModel.toggle()
                         } label: {
                             Label(
@@ -90,6 +105,11 @@ struct CropView: View {
                             onConfirm(cropRect, rotation, headRot)
                         }
                     }
+                }
+                .alert("No Face Detected", isPresented: $detectionFailed) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Could not detect a face in the cropped area. Try adjusting the crop to include a face.")
                 }
         }
         .onAppear {
@@ -248,6 +268,29 @@ struct CropView: View {
             imagePixelSize = CGSize(width: cgImage.width, height: cgImage.height)
         }
         #endif
+    }
+
+    private func detectPose() {
+        isDetectingPose = true
+        detectionFailed = false
+
+        Task {
+            let detected = HeadPoseDetectionService.detectHeadPose(
+                from: imageData,
+                cropRect: cropRect,
+                rotation: rotation
+            )
+
+            await MainActor.run {
+                isDetectingPose = false
+                if let pose = detected {
+                    headRotation = pose
+                    showHeadModel = true
+                } else {
+                    detectionFailed = true
+                }
+            }
+        }
     }
 
     private func cropOverlay(containerSize: CGSize) -> some View {
