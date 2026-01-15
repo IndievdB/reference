@@ -23,6 +23,7 @@ struct CropView: View {
     @State private var showHeadModel: Bool = true
     @State private var isDetectingPose: Bool = false
     @State private var detectionFailed: Bool = false
+    @State private var panelWidth: CGFloat = 280
 
     // Image metrics
     @State private var imagePixelSize: CGSize = .zero  // Actual pixel dimensions
@@ -123,8 +124,27 @@ struct CropView: View {
         HStack(spacing: 0) {
             cropInterface
             if showHeadModel {
+                // Resize handle
+                Rectangle()
+                    .fill(Color.gray.opacity(0.3))
+                    .frame(width: 6)
+                    .onHover { hovering in
+                        if hovering {
+                            NSCursor.resizeLeftRight.push()
+                        } else {
+                            NSCursor.pop()
+                        }
+                    }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { value in
+                                let newWidth = panelWidth - value.translation.width
+                                panelWidth = max(200, min(500, newWidth))
+                            }
+                    )
+
                 headRotationPanel
-                    .frame(width: 220)
+                    .frame(width: panelWidth)
             }
         }
         #else
@@ -171,7 +191,7 @@ struct CropView: View {
     // MARK: - Head Rotation Views
 
     private var headRotationPanel: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             Text("Match Head Angle")
                 .font(.headline)
 
@@ -185,7 +205,7 @@ struct CropView: View {
                 isInteractive: true,
                 showResetButton: true
             )
-            .frame(height: 180)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Show current angles
             VStack(alignment: .leading, spacing: 4) {
@@ -202,8 +222,6 @@ struct CropView: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
-
-            Spacer()
         }
         .padding()
         .background(Color(white: 0.15))

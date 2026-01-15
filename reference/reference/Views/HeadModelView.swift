@@ -144,8 +144,8 @@ struct SceneKitContainer: View {
     private func setupCamera(in scene: SCNScene) {
         let cameraNode = SCNNode()
         cameraNode.camera = SCNCamera()
-        cameraNode.camera?.fieldOfView = 45
-        cameraNode.position = SCNVector3(0, 0, 5)
+        cameraNode.camera?.fieldOfView = 50
+        cameraNode.position = SCNVector3(0, 0, 3)
         scene.rootNode.addChildNode(cameraNode)
     }
 
